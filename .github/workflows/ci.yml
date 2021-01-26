@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - 'staging'
+      - 'trying'
+      - 'master'
+      - 'dev'
+  pull_request:
+
+
+jobs:
+  formatting:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install Rust
+        id: toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          override: true
+          toolchain: 1.49.0
+          components: rustfmt
+
+      - name: Cache cargo registry
+        uses: actions/cache@v2
+        with:
+          path: ~/.cargo/registry
+          # The registry cache is useful as long as we need the same dependencies as another job, regardless of the Rust version and operating system.
+          key: cargo-registry-${{ hashFiles('Cargo.lock') }}-v1
+
+      - name: Cache cargo binaries
+        uses: actions/cache@v2
+        with:
+          path: ~/.cargo/bin
+          # The cargo binary cache is useful as long as we use the same Rust version but regardless of our dependencies.
+          key: ubuntu-latest-cargo-binaries-${{ steps.toolchain.outputs.rustc_hash }}-v1
+
+      - name: Cache target directory
+        uses: actions/cache@v2
+        with:
+          path: target
+          # The target directory is only useful with the same Rust version, dependencies and operating system.
+          key: ubuntu-latest-target-${{ steps.toolchain.outputs.rustc_hash }}-${{ hashFiles('Cargo.lock') }}-clippy-v1
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+  build_and_test:
+    strategy:
+      # we only require ubuntu to succeed for now
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      # install docker for mac first to fail early if this fails
+      - name: Install docker for mac
+        uses: docker-practice/actions-setup-docker@master
+        if: matrix.os == 'macos-latest'
+
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        id: toolchain
+        with:
+          profile: minimal
+          override: true
+          default: true
+          target: ${{ matrix.target }}
+          toolchain: 1.49.0
+
+      - name: Cache cargo registry
+        uses: actions/cache@v2
+        with:
+          path: ~/.cargo/registry
+          # The registry cache is useful as long as we need the same dependencies as another job, regardless of the Rust version and operating system.
+          key: cargo-registry-${{ hashFiles('Cargo.lock') }}-v1
+
+      - name: Cache cargo binaries
+        uses: actions/cache@v2
+        with:
+          path: ~/.cargo/bin
+          # The cargo binary cache is useful as long as we use the same Rust version and operating system, but regardless of our dependencies.
+          key: ${{ matrix.os }}-cargo-binaries-${{ steps.toolchain.outputs.rustc_hash }}-v1
+
+      - name: Cache target directory
+        uses: actions/cache@v2
+        with:
+          path: target
+          # The target directory is only useful with the same Rust version, dependencies and operating system.
+          key: ${{ matrix.os }}-target-${{ steps.toolchain.outputs.rustc_hash }}-${{ hashFiles('Cargo.lock') }}-build-v1
+
+      - name: Run unit tests only
+        run: |
+          cargo test
+
+      - name: Build
+        run: cargo build --all-targets
